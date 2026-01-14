@@ -1,0 +1,47 @@
+{
+  "name": "@kritix/create-rn-app",
+  "version": "1.0.0",
+  "description": "CLI to scaffold React Native apps with Firebase and Superwall",
+  "type": "module",
+  "bin": {
+    "create-rn-app": "./dist/index.js",
+    "@kritix/create-rn-app": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "pnpm build"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "cli",
+    "template",
+    "firebase",
+    "superwall"
+  ],
+  "author": "kritix",
+  "license": "MIT",
+  "packageManager": "pnpm@10.15.0",
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "commander": "^14.0.2",
+    "degit": "^2.8.4",
+    "fs-extra": "^11.3.3",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^25.0.8",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
