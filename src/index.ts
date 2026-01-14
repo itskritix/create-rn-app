@@ -67,7 +67,12 @@ async function main() {
   // Step 1: Clone base template
   s.start("Cloning base template...");
   try {
-    execSync(`npx degit ${TEMPLATE_REPO} ${projectName}`, { stdio: "pipe" });
+    execSync(
+      `git clone --depth 1 https://github.com/${TEMPLATE_REPO}.git ${projectName}`,
+      { stdio: "pipe" }
+    );
+    // Remove .git folder for fresh start
+    await fs.remove(path.join(process.cwd(), projectName, ".git"));
     s.stop("Base template cloned");
   } catch (error) {
     s.stop("Failed to clone template");
