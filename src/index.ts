@@ -12,10 +12,7 @@ const __dirname = path.dirname(__filename);
 
 const TEMPLATE_REPO = "itskritix/react-native-template";
 
-interface ProjectOptions {
-  firebase: boolean;
-  superwall: boolean;
-}
+type DatabaseOption = "none" | "firebase" | "supabase";
 
 async function main() {
   console.clear();
@@ -40,27 +37,31 @@ async function main() {
     process.exit(0);
   }
 
-  // Get options
-  const options = await p.group(
-    {
-      firebase: () =>
-        p.confirm({
-          message: "Add Firebase? (Auth, Firestore, Analytics)",
-          initialValue: false,
-        }),
-      superwall: () =>
-        p.confirm({
-          message: "Add Superwall? (Paywalls + In-App Purchases)",
-          initialValue: false,
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Operation cancelled.");
-        process.exit(0);
-      },
-    }
-  );
+  // Get database option
+  const database = await p.select({
+    message: "Select a backend/database:",
+    options: [
+      { value: "none", label: "None", hint: "Add later" },
+      { value: "firebase", label: "Firebase", hint: "Auth, Firestore, Analytics" },
+      { value: "supabase", label: "Supabase", hint: "Auth, Database, Realtime" },
+    ],
+  });
+
+  if (p.isCancel(database)) {
+    p.cancel("Operation cancelled.");
+    process.exit(0);
+  }
+
+  // Get paywall option
+  const superwall = await p.confirm({
+    message: "Add Superwall? (Paywalls + In-App Purchases)",
+    initialValue: false,
+  });
+
+  if (p.isCancel(superwall)) {
+    p.cancel("Operation cancelled.");
+    process.exit(0);
+  }
 
   const s = p.spinner();
 
@@ -82,15 +83,19 @@ async function main() {
 
   const projectPath = path.resolve(process.cwd(), projectName);
 
-  // Step 2: Add Firebase if selected
-  if (options.firebase) {
+  // Step 2: Add database if selected
+  if (database === "firebase") {
     s.start("Adding Firebase...");
     await addFirebase(projectPath);
     s.stop("Firebase added");
+  } else if (database === "supabase") {
+    s.start("Adding Supabase...");
+    await addSupabase(projectPath);
+    s.stop("Supabase added");
   }
 
   // Step 3: Add Superwall if selected
-  if (options.superwall) {
+  if (superwall) {
     s.start("Adding Superwall...");
     await addSuperwall(projectPath);
     s.stop("Superwall added");
@@ -113,16 +118,12 @@ async function main() {
   }
 
   // Done!
-  p.note(
-    `cd ${projectName}\npnpm start`,
-    "Next steps"
-  );
+  p.note(`cd ${projectName}\npnpm start`, "Next steps");
 
-  p.outro(pc.green("Happy coding! 🚀"));
+  p.outro(pc.green("Happy coding!"));
 }
 
 async function addFirebase(projectPath: string) {
-  // Add Firebase dependencies to package.json
   const pkgPath = path.join(projectPath, "package.json");
   const pkg = await fs.readJson(pkgPath);
 
@@ -209,7 +210,7 @@ export function useFirebaseAuth() {
   );
 
   // Create Firestore hook
-  const firestoreHook = `import firestore from "@react-native-firebase/firestore";
+  const firestoreHook = `import firestore, { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
 
 export function useFirestore() {
   const getDoc = async <T>(collection: string, docId: string): Promise<T | null> => {
@@ -240,8 +241,6 @@ export function useFirestore() {
 
   return { getDoc, setDoc, addDoc, deleteDoc, query };
 }
-
-import { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
 `;
 
   await fs.writeFile(
@@ -262,8 +261,186 @@ import { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
   await fs.writeJson(appJsonPath, appJson, { spaces: 2 });
 }
 
+async function addSupabase(projectPath: string) {
+  const pkgPath = path.join(projectPath, "package.json");
+  const pkg = await fs.readJson(pkgPath);
+
+  pkg.dependencies = {
+    ...pkg.dependencies,
+    "@supabase/supabase-js": "^2.49.1",
+  };
+
+  await fs.writeJson(pkgPath, pkg, { spaces: 2 });
+
+  // Create Supabase client
+  const supabaseClient = `import { createClient } from "@supabase/supabase-js";
+import { getToken, setToken, deleteToken } from "./storage";
+
+const SUPABASE_URL = "YOUR_SUPABASE_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: {
+      getItem: async (key) => {
+        if (key.includes("token")) {
+          return getToken();
+        }
+        return null;
+      },
+      setItem: async (key, value) => {
+        if (key.includes("token")) {
+          await setToken(value);
+        }
+      },
+      removeItem: async (key) => {
+        if (key.includes("token")) {
+          await deleteToken();
+        }
+      },
+    },
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+`;
+
+  await fs.writeFile(
+    path.join(projectPath, "src/lib/supabase.ts"),
+    supabaseClient
+  );
+
+  // Create Supabase auth hook
+  const supabaseAuthHook = `import { useState, useEffect } from "react";
+import { Session, User } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabase";
+
+export function useSupabaseAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  const signUp = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  };
+
+  return {
+    user,
+    session,
+    loading,
+    signIn,
+    signUp,
+    signOut,
+    isAuthenticated: !!user,
+  };
+}
+`;
+
+  await fs.writeFile(
+    path.join(projectPath, "src/hooks/useSupabaseAuth.ts"),
+    supabaseAuthHook
+  );
+
+  // Create Supabase database hook
+  const supabaseDbHook = `import { supabase } from "../lib/supabase";
+
+export function useSupabaseDb() {
+  const getDoc = async <T>(table: string, id: string): Promise<T | null> => {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return data as T;
+  };
+
+  const getDocs = async <T>(table: string): Promise<T[]> => {
+    const { data, error } = await supabase.from(table).select("*");
+    if (error) throw error;
+    return data as T[];
+  };
+
+  const insertDoc = async <T extends object>(table: string, data: T) => {
+    const { data: result, error } = await supabase
+      .from(table)
+      .insert(data)
+      .select()
+      .single();
+    if (error) throw error;
+    return result;
+  };
+
+  const updateDoc = async <T extends object>(
+    table: string,
+    id: string,
+    data: Partial<T>
+  ) => {
+    const { data: result, error } = await supabase
+      .from(table)
+      .update(data)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return result;
+  };
+
+  const deleteDoc = async (table: string, id: string) => {
+    const { error } = await supabase.from(table).delete().eq("id", id);
+    if (error) throw error;
+  };
+
+  return { getDoc, getDocs, insertDoc, updateDoc, deleteDoc };
+}
+`;
+
+  await fs.writeFile(
+    path.join(projectPath, "src/hooks/useSupabaseDb.ts"),
+    supabaseDbHook
+  );
+}
+
 async function addSuperwall(projectPath: string) {
-  // Add Superwall dependencies
   const pkgPath = path.join(projectPath, "package.json");
   const pkg = await fs.readJson(pkgPath);
 
@@ -274,7 +451,6 @@ async function addSuperwall(projectPath: string) {
 
   await fs.writeJson(pkgPath, pkg, { spaces: 2 });
 
-  // Create Superwall config
   const superwallConfig = `import Superwall from "@superwall/react-native-superwall";
 
 const SUPERWALL_API_KEY = "YOUR_SUPERWALL_API_KEY";
@@ -304,7 +480,6 @@ export { Superwall };
     superwallConfig
   );
 
-  // Create Superwall hook
   const superwallHook = `import { useState, useEffect } from "react";
 import Superwall from "@superwall/react-native-superwall";
 
@@ -330,7 +505,6 @@ export function useSuperwall() {
   const showPaywall = async (placement: string = "default") => {
     try {
       await Superwall.register(placement);
-      // Re-check subscription after paywall closes
       await checkSubscription();
     } catch (error) {
       console.error("Paywall error:", error);
@@ -361,7 +535,6 @@ export function useSuperwall() {
     superwallHook
   );
 
-  // Update app.json
   const appJsonPath = path.join(projectPath, "app.json");
   const appJson = await fs.readJson(appJsonPath);
 
@@ -399,7 +572,7 @@ async function updateAppJson(projectPath: string, projectName: string) {
 // Run CLI
 program
   .name("create-rn-app")
-  .description("Create a new React Native app with Firebase and Superwall")
+  .description("Create a new React Native app with Firebase/Supabase and Superwall")
   .version("1.0.0")
   .action(main);
 
